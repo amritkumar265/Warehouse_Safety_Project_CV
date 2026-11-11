@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Model weights and exports
+*.pt
+*.pth
+*.onnx
+*.engine
+*.safetensors
+
+# Datasets and uploaded media
+datasets/
+data/
+uploads/
+videos/
+
+# Generated outputs and experiment artifacts
+outputs/
+warehouse_run_artifacts/
+runs/
+wandb/
+mlruns/
+
+# Logs
+*.log
+
