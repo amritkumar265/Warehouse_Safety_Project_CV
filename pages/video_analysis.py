@@ -28,7 +28,7 @@ ZONE_COLORS = {
     "machinery": "#FFA500",
     "shared_movement": "#00BFFF",
     "pedestrian_walkway": "#00C853",
-    "person_access": "#AB47BC"
+    "miscellaneous": "#AB47BC"
 }
 
 
@@ -210,6 +210,9 @@ selected_camera = st.selectbox(
     registered_cameras
 )
 
+st.session_state.pop("analysis_video_path", None)
+st.session_state.pop("analysis_camera_id", None)
+
 profile = load_profile(selected_camera)
 
 if not profile:
@@ -277,8 +280,11 @@ else:
 
     uploaded_file = st.file_uploader(
         "Upload CCTV footage",
-        type=SUPPORTED_VIDEOS
+        type=SUPPORTED_VIDEOS,
+        key = f"upload_{selected_camera}"
     )
+
+    upload_key = f"uploaded_video_path_{selected_camera}"
 
     if uploaded_file is not None:
 
@@ -290,7 +296,7 @@ else:
                     selected_camera
                 )
 
-                st.session_state["selected_video_path"] = str(
+                st.session_state[upload_key] = str(
                     selected_video
                 )
 
@@ -299,7 +305,7 @@ else:
             except Exception as error:
                 st.error(str(error))
 
-        saved_path = st.session_state.get("selected_video_path")
+        saved_path = st.session_state.get(upload_key)
 
         if saved_path and Path(saved_path).exists():
             selected_video = Path(saved_path)
@@ -386,6 +392,18 @@ if selected_video is not None:
         )
 
         st.session_state["analysis_camera_id"] = selected_camera
+
+        st.divider()
+
+        st.subheader("4 . Detection")
+
+        if st.button(
+            "Open in Detection Lab",
+            type = "primary",
+            use_container_width=True
+        ):
+
+            st.switch_page("pages/detection_lab.py")
 
     except Exception as error:
         st.error(f"Video preview failed: {error}")

@@ -13,7 +13,7 @@ from PIL import Image , ImageDraw
 from streamlit_drawable_canvas import st_canvas
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-VIDEO_DIR = PROJECT_ROOT / "videos" / "camera001"
+VIDEO_DIR = PROJECT_ROOT / "videos"
 CAMERAS_DIR = PROJECT_ROOT / "configs" / "cameras"
 CAMERAS_DIR.mkdir(parents = True , exist_ok = True)
 
@@ -33,12 +33,18 @@ ZONE_COLORS = {
     "miscellaneous" : "#AB47BC"
 }
 
-def get_video_files():
-    if not VIDEO_DIR.exists():
+def get_video_files(camera_id):
+    if not camera_id:
+        return []
+
+    folder_name = camera_id.lower().replace("_" , "")
+    camera_video_dir = VIDEO_DIR / folder_name
+
+    if not camera_video_dir.exists():
         return []
 
     return sorted(
-        p for p in VIDEO_DIR.iterdir()
+        p for p in camera_video_dir.iterdir()
         if p.is_file() and p.suffix.lower() in SUPPORTED_VIDEOS
     )
 
@@ -185,7 +191,7 @@ with st.expander("Register a new camera" , expanded = not existing_profiles):
         value = "Warehouse Camera 001"
     )
 
-    video_files = get_video_files()
+    video_files = get_video_files(camera_id)
 
     if video_files:
         video_labels = {
