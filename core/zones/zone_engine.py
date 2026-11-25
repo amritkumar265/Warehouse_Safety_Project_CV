@@ -130,7 +130,7 @@ class ZoneEngine:
 
             zone_results[zone_key] = {
                 "contains_bottom_center": is_inside,
-                "bbox_coverage": round(coverage, 4)
+                "bbox_coverage": coverage
             }
 
             if is_inside:

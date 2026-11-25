@@ -1,0 +1,9 @@
+trajectory_history_length: 30
+track_cleanup_after_frames: 60
+temporal_smoothing_window: 5
+approach_state_observations: 3
+approach_delta_threshold_px: 1.0
+alert_cooldown_seconds: 5.0
+proximity:
+  caution_px: 150.0
+  danger_px: 80.0

@@ -6,10 +6,14 @@ import streamlit as st
 from core.camera.profile_manager import load_profile
 from src.detection_pipeline import DetectionPipeline
 from src.config import MODELS_DIR , OUTPUTS_DIR
+from src.video_utils import ensure_browser_compatible_video
 
 
 st.title("🔍 Detection Lab")
-st.caption("YOLO, Grounding DINO and detection fusion.")
+st.caption(
+    "Run object detection with YOLO, Grounding DINO, fusion, or RF-DETR. "
+    "Track the saved detections separately in Tracking Lab."
+)
 st.divider()
 
 #--------------------Input Validation--------------------
@@ -41,15 +45,48 @@ if not profile:
     st.error(f"Unable to load profile for camera: {camera_id}")
     st.stop()
 
-input_key = f"{camera_id}|{video_path.resolve()}"
+MODEL_PATH = MODELS_DIR/"yolo11s_warehouse_best.pt"
+
+model_options = {
+    "YOLO": "YOLO",
+    "Grounding DINO": "Grounding DINO",
+    "Fusion (YOLO + Grounding DINO)": "Fusion",
+    "RF-DETR": "RF-DETR"
+}
+selected_model_label = st.selectbox(
+    "Detection model",
+    list(model_options)
+)
+selected_model = model_options[selected_model_label]
+
+rfdetr_checkpoint_path = None
+if selected_model == "RF-DETR":
+    st.caption(
+        "RF-DETR Small and the base package are Apache-2.0 licensed. "
+        "[License details](https://github.com/roboflow/rf-detr/blob/develop/LICENSE)"
+    )
+    st.caption(
+        "RF-DETR Small uses COCO classes by default. "
+        "Use a fine-tuned RF-DETR checkpoint to detect forklift or pallet-truck classes."
+    )
+    checkpoint_input = st.text_input(
+        "Optional RF-DETR checkpoint path",
+        placeholder="models/rfdetr_warehouse.pth"
+    ).strip()
+    if checkpoint_input:
+        rfdetr_checkpoint_path = Path(checkpoint_input)
+        if not rfdetr_checkpoint_path.is_file():
+            st.error(f"RF-DETR checkpoint not found: {rfdetr_checkpoint_path}")
+            st.stop()
+input_key = (
+    f"{camera_id}|{video_path.resolve()}|{selected_model}|"
+    f"{rfdetr_checkpoint_path or ''}"
+)
 
 if st.session_state.get("detection_input_key") != input_key:
-    st.session_state.pop("detection_results" , None)
-    st.session_state.pop("detection_output_path" , None)
+    st.session_state.pop("detection_results", None)
+    st.session_state.pop("detection_output_path", None)
     st.session_state["detection_input_key"] = input_key
-
-
-MODEL_PATH = MODELS_DIR/"yolo11s_warehouse_best.pt"
 
 #-------Selected Input---------------
 
@@ -83,17 +120,31 @@ st.subheader("2 . Detection Configuration")
 col1 , col2 = st.columns(2)
 
 with col1:
-    st.write("**YOLO checkpoint**")
-    st.code(str(MODEL_PATH))
+    st.write("**Selected model**")
+    st.write(selected_model_label)
 
 with col2:
-    st.write("**Detection architecture**")
-    st.write("YOLO + Grounding DINO + BoxFusion")
+    if selected_model in {"YOLO", "Fusion"}:
+        st.write("**YOLO checkpoint**")
+        st.code(str(MODEL_PATH))
+    elif selected_model == "RF-DETR":
+        st.write("**RF-DETR checkpoint**")
+        st.write(str(rfdetr_checkpoint_path or "RF-DETR Small (COCO pretrained)"))
+
+if selected_model == "Fusion":
+    st.caption(
+        "Low-confidence forklift and pallet-truck boxes are kept only when "
+        "YOLO and Grounding DINO agree on their location; higher-confidence "
+        "vehicle boxes and person detections are unchanged."
+    )
 
 st.write("**Zone filtering:** Enabled")
 st.write("**Camera profile:**" ,  camera_id)
 
-if not MODEL_PATH.exists():
+if (
+    selected_model in {"YOLO", "Fusion"}
+    and not MODEL_PATH.exists()
+):
     st.error(f"YOLO checkpoint not found: {MODEL_PATH}")
     st.stop()
 
@@ -127,14 +178,22 @@ if st.button(
                     f"Processing frame {current:,} / {total:,}"
                     f"({percentage}%)"
                 )
-        status.write("Loading YOLO model...")
-        status.write("Loading Grounding DINO...")
-        status.write("Initializing BoxFusion and Zone Filter...")
+        if selected_model in {"YOLO", "Fusion"}:
+            status.write("Loading YOLO model...")
+        if selected_model in {"Grounding DINO", "Fusion"}:
+            status.write("Loading Grounding DINO...")
+        if selected_model == "RF-DETR":
+            status.write("Loading RF-DETR...")
+        if selected_model == "Fusion":
+            status.write("Initializing BoxFusion...")
+        status.write("Initializing Zone Filter...")
 
         pipeline = DetectionPipeline(
             camera_profile=profile,
             yolo_model_path = MODEL_PATH,
-            progress_callback= update_progress
+            progress_callback=update_progress,
+            model_choice=selected_model,
+            rfdetr_checkpoint_path=rfdetr_checkpoint_path
         )
 
         status.write("Models loaded successfully...")
@@ -146,7 +205,7 @@ if st.button(
 
         output_path = (
             output_dir /
-            f"{camera_id}_{video_path.stem}_filtered_"
+            f"{camera_id}_{video_path.stem}_{selected_model.lower().replace(' ', '-')}_filtered_"
             f"{uuid.uuid4().hex[:8]}.mp4"
         )
 
@@ -159,6 +218,21 @@ if st.button(
 
         st.session_state["detection_results"] = results
         st.session_state["detection_output_path"] = str(output_path)
+        detection_runs = st.session_state.setdefault("detection_runs", [])
+        detection_run = {
+            "run_id": uuid.uuid4().hex,
+            "camera_id": camera_id,
+            "video_path": str(video_path.resolve()),
+            "model_choice": selected_model,
+            "detection_data_path": results["detection_data_path"],
+            "detection_video_path": str(output_path),
+            "frames_processed": results["frames_processed"],
+            "average_inference_fps": results["average_inference_fps"]
+        }
+        detection_runs.append(detection_run)
+        st.session_state["latest_detection_run_id"] = (
+            detection_run["run_id"]
+        )
 
         status.update(
             label = "Detection completed successfully...",
@@ -228,28 +302,51 @@ if results and output_path_value:
             f"Processing time: {results["processing_time"]} seconds"
         )
 
+        detection_data_value = results.get("detection_data_path")
+        if detection_data_value and Path(detection_data_value).is_file():
+            detection_data_path = Path(detection_data_value)
+            with detection_data_path.open("rb") as detections_file:
+                st.download_button(
+                    "Download frame-by-frame detection data",
+                    data=detections_file,
+                    file_name=detection_data_path.name,
+                    mime="application/x-ndjson",
+                    use_container_width=True
+                )
+            st.info(
+                "Detections are saved frame by frame. Open Tracking Lab to "
+                "apply ByteTrack to this or another detector run."
+            )
+            if st.button("Open Tracking Lab", type="primary"):
+                st.switch_page("pages/tracking_lab.py")
+        else:
+            st.warning(
+                "This result has no saved frame-by-frame boxes. Run detection "
+                "again to make it available in Tracking Lab."
+            )
+
         st.divider()
         st.subheader("5 . Filtered Output Video")
 
-        if output_path_value:
-            output_path = Path(output_path_value)
+        try:
+            playback_path = ensure_browser_compatible_video(output_path)
+        except (RuntimeError, OSError) as error:
+            st.error(f"Could not prepare the video for browser playback: {error}")
+        else:
+            st.video(str(playback_path), format="video/mp4")
 
-            if output_path.exists():
-                st.video(str(output_path))
-
-            with open(output_path , "rb") as video_file:
+            with open(playback_path, "rb") as video_file:
                 st.download_button(
                     label = "⬇️ Download Processed Video",
                     data=video_file,
-                    file_name=output_path.name,
+                    file_name=playback_path.name,
                     mime = "video/mp4",
                     use_container_width=True
                 )
 
-        else:
-            st.warning("the recorded output video could not be found")
-
-    st.success("VisionSentinel processing completed.")
+            st.success("VisionSentinel processing completed.")
+    else:
+        st.error(f"Processed video was not found: {output_path}")
 
 
 

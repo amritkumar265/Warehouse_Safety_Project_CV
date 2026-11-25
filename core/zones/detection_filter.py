@@ -50,16 +50,24 @@ class ZoneDetectionFilter:
 
             bbox = detections.xyxy[index].tolist()
 
+            detected_names = detections.data.get("class_name")
             class_id = (
                 int(detections.class_id[index])
                 if detections.class_id is not None
                 else None
             )
 
-            class_name = CLASS_MAPPING.get(
-                class_id,
-                "unknown"
-            )
+            if detected_names is not None:
+                class_name = str(detected_names[index]).lower()
+                normalized_name = class_name.replace("-", " ").replace("_", " ")
+                if "person" in normalized_name:
+                    class_name = "person"
+                elif "forklift" in normalized_name:
+                    class_name = "forklift"
+                elif "pallet truck" in normalized_name or "pallet jack" in normalized_name:
+                    class_name = "pallet_truck"
+            else:
+                class_name = CLASS_MAPPING.get(class_id, "unknown")
 
             confidence = (
                 float(detections.confidence[index])

@@ -6,6 +6,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = PROJECT_ROOT / "models"
 VIDEOS_DIR = PROJECT_ROOT / "videos"
 OUTPUTS_DIR = PROJECT_ROOT / "outputs"
+BYTE_TRACKER_CONFIG_PATH = PROJECT_ROOT / "configs" / "bytetrack.yaml"
+TRACKING_SAFETY_CONFIG_PATH = PROJECT_ROOT / "configs" / "tracking_safety.yaml"
 
 OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -21,4 +23,6 @@ YOLO_CONF_THRESH = 0.25
 DINO_BOX_THRESH = 0.35
 DINO_TEXT_THRESH = 0.25
 NMS_IOU_THRESH = 0.50
+FUSION_VEHICLE_MIN_CONFIDENCE = 0.50
+FUSION_VEHICLE_AGREEMENT_IOU = 0.50
 DINO_PROMPT = "person. forklift. pallet truck. pallet jack. manual pallet jack."

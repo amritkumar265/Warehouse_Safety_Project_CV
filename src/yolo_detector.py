@@ -1,10 +1,14 @@
-# src/yolo_detector.py
 from ultralytics import YOLO
 import supervision as sv
 import numpy as np
 
 class YoloDetector:
-    def __init__(self, model_path: str, conf: float = 0.25, imgsz: int = 800):
+    def __init__(
+        self,
+        model_path: str,
+        conf: float = 0.25,
+        imgsz: int = 800
+    ):
         self.model = YOLO(model_path)
         self.conf = conf
         self.imgsz = imgsz
@@ -12,8 +16,14 @@ class YoloDetector:
 
     def detect(self, frame: np.ndarray) -> sv.Detections:
         """Runs YOLO on a single frame and maps detections to unified classes."""
-        results = self.model(frame, conf=self.conf, imgsz=self.imgsz, verbose=False)[0]
-        raw_det = sv.Detections.from_ultralytics(results)
+        result = self.model(
+            frame,
+            conf=self.conf,
+            imgsz=self.imgsz,
+            verbose=False
+        )[0]
+
+        raw_det = sv.Detections.from_ultralytics(result)
         
         if len(raw_det) == 0:
             return sv.Detections.empty()

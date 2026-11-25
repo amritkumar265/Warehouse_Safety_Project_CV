@@ -1,4 +1,5 @@
 ultralytics
+lap>=0.5.12
 transformers
 accelerate
 supervision
@@ -14,6 +15,7 @@ torchvision
 time
 safetensors
 timm
+rfdetr
 scipy
 matplotlib
 ipykernel

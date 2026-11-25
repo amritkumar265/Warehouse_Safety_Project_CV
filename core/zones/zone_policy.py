@@ -6,7 +6,7 @@ class ZonePolicyEngine:
 
         self.policies = {
             "machinery": {
-                "person": "retain",
+                "person": "suppress_candidate",
                 "forklift": "suppress_candidate",
                 "pallet_truck": "suppress_candidate"
             },
@@ -30,6 +30,14 @@ class ZonePolicyEngine:
             }
         }
 
+        self.suppression_thresholds = {
+            "machinery": {
+                "person": 0.50,
+                "forklift": 0.70,
+                "pallet_truck": 0.70
+            }
+        }
+
     def evaluate(self, association_result):
 
         class_name = association_result["class_name"].lower()
@@ -41,66 +49,71 @@ class ZonePolicyEngine:
 
         candidate_decisions = []
 
-        # Evaluate every configured zone.
         for zone_key, zone_data in zone_results.items():
-
             zone_policy = self.policies.get(zone_key, {})
             if zone_key == "miscellaneous":
                 zone_decision = "suppress_candidate"
-
             else:
-                zone_decision = zone_policy.get(class_name , "retain")
+                zone_decision = zone_policy.get(class_name, "retain")
 
             contains_bottom_center = zone_data["contains_bottom_center"]
             coverage = zone_data["bbox_coverage"]
+            suppression_threshold = self.suppression_threshold
 
-            # Zone association:
-            # Bottom-centre inside OR sufficient bbox coverage.
             if zone_key == "miscellaneous":
-                is_associated = (
-                    contains_bottom_center or coverage >= 0.50
-                )
-
+                is_associated = coverage > 0
+                suppression_threshold = 0
+            elif zone_decision == "suppress_candidate":
+                suppression_threshold = self.suppression_thresholds.get(
+                    zone_key, {}
+                ).get(class_name, self.suppression_threshold)
+                is_associated = coverage > suppression_threshold
             else:
                 is_associated = (
-                    contains_bottom_center or coverage >= self.suppression_threshold
+                    contains_bottom_center
+                    or coverage >= self.suppression_threshold
                 )
-                
+
             if not is_associated:
                 continue
 
-            if zone_decision == "flag":
-                candidate_decisions.append(
-                    (3, "flag", zone_key, coverage)
+            priority = {
+                "suppress_candidate": 3,
+                "flag": 2,
+                "retain": 1
+            }[zone_decision]
+            candidate_decisions.append(
+                (
+                    priority,
+                    zone_decision,
+                    zone_key,
+                    coverage,
+                    suppression_threshold
                 )
+            )
 
-            elif zone_decision == "suppress_candidate":
-                candidate_decisions.append(
-                    (2, "suppress_candidate", zone_key, coverage)
-                )
-
-            else:
-                candidate_decisions.append(
-                    (1, "retain", zone_key, coverage)
-                )
-
-        # Resolve conflicting zone policies using priority.
         if candidate_decisions:
 
-            priority, proposed_decision, selected_zone, coverage = max(
+            (
+                _,
+                proposed_decision,
+                selected_zone,
+                coverage,
+                suppression_threshold
+            ) = max(
                 candidate_decisions,
                 key=lambda item: item[0]
             )
 
             if proposed_decision == "suppress_candidate":
-
-                if coverage >= self.suppression_threshold or selected_zone == "miscellaneous":
-                    decision = "suppress_candidate"
-                    reason = f"{selected_zone}_high_coverage"
-
+                decision = "suppress_candidate"
+                if selected_zone == "miscellaneous":
+                    reason = "miscellaneous_zone_overlap"
                 else:
-                    decision = "retain"
-                    reason = "insufficient_zone_coverage"
+                    reason = (
+                        f"{selected_zone}_overlap_above_"
+                        f"{suppression_threshold:.0%}"
+                    )
 
             elif proposed_decision == "flag":
                 decision = "flag"

@@ -1,11 +1,13 @@
 from core.camera.profile_manager import (
     CAMERAS_DIR,
+    get_camera_dir,
     load_profile,
     save_profile,
     get_registered_cameras
 )
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import cv2
 import streamlit as st
@@ -83,6 +85,50 @@ def extract_reference_frame(video_path , percentage):
     }
 
     return Image.fromarray(rgb), metadata
+
+def extract_rtsp_reference_frame(rtsp_url):
+    cap = cv2.VideoCapture(
+        rtsp_url,
+        cv2.CAP_FFMPEG,
+        [
+            cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000,
+            cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10000
+        ]
+    )
+
+    try:
+        if not cap.isOpened():
+            raise RuntimeError(
+                "Unable to open RTSP stream. Check the URL and camera availability."
+            )
+
+        success, frame = cap.read()
+
+        if not success:
+            raise RuntimeError("Unable to read a frame from the RTSP stream.")
+
+        metadata = {
+            "width": int(frame.shape[1]),
+            "height": int(frame.shape[0]),
+            "fps": round(cap.get(cv2.CAP_PROP_FPS), 2),
+            "frame_count": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+        }
+
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(rgb), metadata
+    finally:
+        cap.release()
+
+def is_valid_rtsp_url(rtsp_url):
+    try:
+        parsed_url = urlsplit(rtsp_url)
+    except ValueError:
+        return False
+
+    return (
+        parsed_url.scheme.lower() in {"rtsp", "rtsps"}
+        and parsed_url.hostname is not None
+    )
 
 def extract_polygon(canvas_data , canvas_width , canvas_height):
     if not canvas_data:
@@ -184,101 +230,143 @@ with st.expander("Register a new camera" , expanded = not existing_profiles):
         "Camera ID",
         value = "Camera_001",
         help = "Use a unique ID , for example Camera_01."
-    )
+    ).strip()
 
     camera_name = st.text_input(
         "Camera Name",
         value = "Warehouse Camera 001"
     )
 
-    video_files = get_video_files(camera_id)
+    camera_source = st.radio(
+        "Camera source",
+        ["Project video", "RTSP stream"],
+        horizontal=True
+    )
 
-    if video_files:
-        video_labels = {
-            str(p.relative_to(PROJECT_ROOT)) : p
-            for p in video_files
-        }
+    selected_video_label = None
+    rtsp_url = ""
 
-        selected_video_label = st.selectbox(
-            "Reference video",
-            list(video_labels.keys())
-        )
+    if camera_source == "Project video":
+        video_files = get_video_files(camera_id)
 
-        selected_video = video_labels[selected_video_label]
+        if video_files:
+            video_labels = {
+                str(p.relative_to(PROJECT_ROOT)): p
+                for p in video_files
+            }
 
-        frame_percentage = st.slider(
-            "reference frame position (%)",
-            min_value = 0,
-            max_value = 100,
-            value = 50
-        )
+            selected_video_label = st.selectbox(
+                "Reference video",
+                list(video_labels.keys())
+            )
 
-        if st.button("Extract Reference Frame"):
+            selected_video = video_labels[selected_video_label]
+
+            frame_percentage = st.slider(
+                "Reference frame position (%)",
+                min_value=0,
+                max_value=100,
+                value=50
+            )
+
+            if st.button("Extract Reference Frame"):
+                try:
+                    image, metadata = extract_reference_frame(
+                        selected_video,
+                        frame_percentage
+                    )
+                    camera_dir = get_camera_dir(camera_id)
+                    camera_dir.mkdir(parents=True, exist_ok=True)
+
+                    reference_path = camera_dir / "reference.jpg"
+                    image.save(str(reference_path), format="JPEG")
+
+                    st.session_state[f"reference_metadata_{camera_id}"] = metadata
+                    st.session_state[f"reference_video_{camera_id}"] = selected_video_label
+                    st.success("Reference frame extracted.")
+
+                except Exception as error:
+                    st.error(str(error))
+        else:
+            st.warning("No project video found for this camera ID.")
+    else:
+        rtsp_url = st.text_input(
+            "RTSP URL",
+            type="password",
+            placeholder="rtsp://user:password@camera-address:554/stream",
+            help="The RTSP URL is saved in this camera's profile."
+        ).strip()
+
+    if st.button("Register Camera", type="primary"):
+
+        if not camera_id.strip() or not camera_name.strip():
+            st.error("Camera ID and name are required.")
+
+        elif Path(camera_id).name != camera_id:
+            st.error("Camera ID must be a simple folder name.")
+
+        elif camera_source == "RTSP stream" and not rtsp_url:
+            st.error("An RTSP URL is required.")
+
+        elif camera_source == "RTSP stream" and (
+            not is_valid_rtsp_url(rtsp_url)
+        ):
+            st.error("Enter a valid RTSP URL, including its camera address.")
+
+        elif camera_source == "Project video" and not selected_video_label:
+            st.error("Select a project video before registering.")
+
+        else:
             try:
-                image , metadata = extract_reference_frame(
-                    selected_video,
-                    frame_percentage
-                )
-                camera_dir = CAMERAS_DIR / camera_id
-                camera_dir.mkdir(parents = True , exist_ok = True)
-
+                camera_dir = get_camera_dir(camera_id)
                 reference_path = camera_dir / "reference.jpg"
-                image.save(str(reference_path), format="JPEG")
+                existing_profile = load_profile(camera_id) or {}
 
-                st.success(f"Reference saved: {reference_path}")
+                if camera_source == "RTSP stream":
+                    image, metadata = extract_rtsp_reference_frame(rtsp_url)
+                    camera_dir.mkdir(parents=True, exist_ok=True)
+                    image.save(str(reference_path), format="JPEG")
+                    reference_video = None
+                else:
+                    metadata = st.session_state.get(
+                        f"reference_metadata_{camera_id}", {}
+                    )
+                    reference_video = st.session_state.get(
+                        f"reference_video_{camera_id}",
+                        existing_profile.get("reference_video")
+                    )
 
-                st.session_state["reference_image"] = image
-                st.session_state["reference_metadata"] = metadata
-                st.session_state["reference_video"] = selected_video_label
-                st.success("Reference frame extracted.")
+                if not reference_path.exists():
+                    st.error("Extract a reference frame before registering.")
+                else:
+                    old_resolution = existing_profile.get(
+                        "resolution", [None, None]
+                    )
+                    profile = {
+                        "camera_id": camera_id,
+                        "camera_name": camera_name,
+                        "source_type": (
+                            "rtsp" if camera_source == "RTSP stream" else "video"
+                        ),
+                        "resolution": [
+                            metadata.get("width", old_resolution[0]),
+                            metadata.get("height", old_resolution[1])
+                        ],
+                        "reference_video": reference_video,
+                        "zones": existing_profile.get("zones", {})
+                    }
+
+                    if camera_source == "RTSP stream":
+                        profile["rtsp_url"] = rtsp_url
+
+                    save_profile(profile)
+                    st.session_state["active_camera"] = camera_id
+
+                    st.success(f"{camera_id} registered successfully.")
+                    st.rerun()
 
             except Exception as error:
                 st.error(str(error))
-
-        if not video_files:
-            st.warning(
-                "No video found in the project's videos directory"
-            )
-
-        if st.button("Register Camera", type="primary"):
-
-            if not camera_id.strip() or not camera_name.strip():
-                st.error("Camera ID and name are required.")
-
-            elif not (CAMERAS_DIR / camera_id / "reference.jpg").exists():
-                st.error("Extract a reference frame before registering.")
-
-            else:
-                metadata = st.session_state.get("reference_metadata", {})
-                existing_profile = load_profile(camera_id) or {}
-
-                profile = {
-                    "camera_id": camera_id,
-                    "camera_name": camera_name,
-                    "resolution": [
-                        metadata.get("width"),
-                        metadata.get("height")
-                    ],
-                    "reference_video": st.session_state.get(
-                    "reference_video",
-                    existing_profile.get("reference_video")
-                ),
-            # Preserve existing zone configuration
-                "zones": existing_profile.get("zones", {})
-            }
-
-        # Preserve existing metadata if new metadata is unavailable
-            if not metadata:
-                profile["resolution"] = existing_profile.get(
-                "resolution", [None, None]
-            )
-
-            save_profile(profile)
-
-            st.session_state["active_camera"] = camera_id
-
-            st.success(f"{camera_id} registered successfully.")
-            st.rerun()
 
 
 st.divider()
